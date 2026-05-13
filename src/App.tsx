@@ -92,6 +92,8 @@ export default function App() {
   const [aiDetections, setAiDetections] = useState<AIDetection[]>([]);
   const [trackedObjects, setTrackedObjects] = useState<TrackedObject[]>([]);
   const [isAiProcessing, setIsAiProcessing] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const aiCooldownRef = useRef(false);
 
   const nextId = useRef(1);
 
@@ -191,8 +193,10 @@ export default function App() {
   // AI Detection Loop
   const performAiDetection = useCallback(async (forceVoice = false) => {
     if (!aiEnabled || (isAiProcessing && !forceVoice) || !videoRef.current || videoRef.current.readyState < 2) return;
+    if (aiCooldownRef.current && !forceVoice) return;
 
     setIsAiProcessing(true);
+    setAiError(null);
     try {
       // Capture current frame
       const canvas = document.createElement('canvas');
@@ -370,8 +374,27 @@ export default function App() {
           ...prev.slice(0, 10)
         ]);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("AI Error:", error);
+      let errorMsg = "AI_QUERY_FAILED";
+      
+      if (error?.message?.includes('429') || error?.message?.includes('RESOURCE_EXHAUSTED')) {
+        errorMsg = "AI_QUOTA_EXHAEDED";
+        setAiError("AI Quota Exceeded. Retrying in 15s...");
+        aiCooldownRef.current = true;
+        setTimeout(() => { aiCooldownRef.current = false; setAiError(null); }, 15000);
+      } else {
+        setAiError("AI Neural Error. Visual process restart...");
+      }
+
+      setLogs(prev => [
+        { 
+          time: new Date().toLocaleTimeString().slice(0, 8), 
+          msg: `ERROR: ${errorMsg}`, 
+          type: 'alert' 
+        },
+        ...prev.slice(0, 10)
+      ]);
     } finally {
       setIsAiProcessing(false);
     }
@@ -387,8 +410,11 @@ export default function App() {
     return () => clearInterval(aiInterval);
   }, [status, motionLevel, performAiDetection]);
 
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
   // Initialize Camera
   const startCamera = useCallback(async () => {
+    setErrorMessage(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: { 
@@ -403,12 +429,20 @@ export default function App() {
         setHasPermission(true);
         speak("Sistem Neural Eye aktif. Semua sektor dalam pemantauan.");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Camera error:", err);
       setHasPermission(false);
       setStatus(SystemStatus.ERROR);
+      
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        setErrorMessage("Akses kamera ditolak. Harap izinkan akses kamera di pengaturan browser Anda.");
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        setErrorMessage("Kamera tidak ditemukan. Hubungkan sensor optik untuk melanjutkan.");
+      } else {
+        setErrorMessage("Kesalahan sistem sensor optik. Periksa koneksi perangkat.");
+      }
     }
-  }, []);
+  }, [speak]);
 
   useEffect(() => {
     startCamera();
@@ -659,7 +693,19 @@ export default function App() {
             </AnimatePresence>
 
             {/* AI Status Indicator */}
-            <div className="absolute bottom-4 right-4 flex items-center gap-2">
+            <div className="absolute bottom-4 right-4 flex flex-col items-end gap-2">
+              <AnimatePresence>
+                {aiError && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
+                    className="bg-red-600/90 text-white px-3 py-1 text-[10px] uppercase font-bold border border-red-400/50 shadow-[0_0_10px_rgba(220,38,38,0.3)]"
+                  >
+                    {aiError}
+                  </motion.div>
+                )}
+              </AnimatePresence>
               {isAiProcessing && (
                 <motion.div 
                   initial={{ opacity: 0 }}
@@ -809,14 +855,19 @@ export default function App() {
                 className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center p-8 text-center z-50"
               >
                 <ShieldAlert className="w-16 h-16 text-red-600 mb-4" />
-                <h2 className="text-2xl font-black mb-2 text-red-500">PERIMETER BREACH ENFORCED</h2>
-                <p className="opacity-70 max-w-sm mb-6 text-sm">Optical sensor authorization required. Grant system access to resume neural monitoring.</p>
-                <button 
-                  onClick={startCamera}
-                  className="px-8 py-3 bg-[#00FF41] text-black font-black uppercase hover:bg-white transition-colors"
-                >
-                  Authorize System
-                </button>
+                <h2 className="text-2xl font-black mb-2 text-red-500 uppercase tracking-tighter">System Access Blocked</h2>
+                <p className="opacity-70 max-w-sm mb-6 text-sm leading-relaxed">
+                  {errorMessage || "Optical sensor authorization required. Grant system access to resume neural monitoring."}
+                </p>
+                <div className="flex flex-col gap-3">
+                  <button 
+                    onClick={startCamera}
+                    className="px-8 py-3 bg-[#00FF41] text-black font-black uppercase hover:bg-white transition-colors border-2 border-[#00FF41]"
+                  >
+                    Retry Authorization
+                  </button>
+                  <p className="text-[10px] opacity-40 uppercase tracking-widest">Error_Code: ERR_OPTICAL_DENIED</p>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
