@@ -1,0 +1,6 @@
+{
+  "name": "NEURAL-EYE CCTV AI",
+  "description": "Geometric Balanced AI CCTV system with real-time neural object recognition, Indonesian voice notifications, motion detection, and matrix-inspired styling.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["AI CCTV", "Object Recognition", "Voice Notifications", "Night Vision", "Motion Detection", "Real-time Monitoring"]
+}
